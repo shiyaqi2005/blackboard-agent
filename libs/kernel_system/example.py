@@ -8,11 +8,10 @@
 """
 from typing_extensions import TypedDict
 
-from langchain_openai import ChatOpenAI
-
 from langgraph_kernel import build_kernel_graph
 from langgraph_kernel.worker.base import RuleWorkerAgent
 from langgraph_kernel.types import JsonPatch
+from langgraph_kernel.llm_wrapper import SimpleChatModel
 
 
 # ── Workers ───────────────────────────────────────────────────────────────────
@@ -51,10 +50,11 @@ class ExecutorWorker(RuleWorkerAgent):
 
 def main():
     # 配置模型（使用你的第三方 API）
-    llm = ChatOpenAI(
-        model="gpt-4",  # 替换为你的模型
-        api_key="your-api-key",  # 替换为你的 key
-        base_url="https://api.openai.com/v1",  # 替换为你的 API 地址
+    llm = SimpleChatModel(
+        model="gemini-2.5-flash",  # 替换为你的模型
+        api_key="sk-2OsXSnW0fVfpFVnT4HeOkGDue8bxgRflUSc9KqCx7mnNOTgb",  # 替换为你的 key
+        base_url="https://tb.api.mkeai.com/v1",  # 替换为你的 API 地址
+        temperature=0.7,
     )
 
     # 构建图
@@ -66,10 +66,38 @@ def main():
 
     # 执行
     print("🚀 启动旅行规划系统...\n")
+
+    # 方式1：让 Architect 自动生成 schema 和 rules（可能不匹配现有 workers）
+    # result = graph.invoke({
+    #     "domain_state": {"user_prompt": "帮我规划一个去日本的旅行"},
+    #     "data_schema": {},
+    #     "workflow_rules": {},
+    #     "pending_patch": [],
+    #     "patch_error": "",
+    #     "step_count": 0,
+    # })
+
+    # 方式2：手动指定 schema 和 rules（确保匹配现有 workers）
     result = graph.invoke({
-        "domain_state": {"user_prompt": "帮我规划一个去日本的旅行"},
-        "data_schema": {},
-        "workflow_rules": {},
+        "domain_state": {
+            "user_prompt": "帮我规划一个去日本的旅行",
+            "status": "planning",  # 初始状态
+        },
+        "data_schema": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "plan": {"type": "array", "items": {"type": "string"}},
+                "result": {"type": "string"},
+            },
+            "required": ["status"],
+        },
+        "workflow_rules": {
+            "status": {
+                "planning": "planner_worker",
+                "executing": "executor_worker",
+            }
+        },
         "pending_patch": [],
         "patch_error": "",
         "step_count": 0,

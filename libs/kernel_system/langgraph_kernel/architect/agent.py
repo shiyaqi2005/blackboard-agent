@@ -1,30 +1,110 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel
 
 from langgraph_kernel.types import KernelState
 
 
-class _ArchitectOutput(BaseModel):
-    data_schema: dict[str, Any]
-    workflow_rules: dict[str, dict[str, str]]
-
-
 _SYSTEM_PROMPT = """\
-You are an Architect Agent. Given a user prompt, you must output:
+You are an Architect Agent that designs workflows for ANY type of task. Your job is to:
 
-1. `data_schema`: A valid JSON Schema (draft-07) that defines the structure of the
-   system's domain state. Include type constraints and required fields.
+1. **Understand the user's intent** - even if the prompt is vague or incomplete
+2. **Decompose the task** into logical steps that can be executed by specialized workers
+3. **Design a flexible state machine** that can handle the task flow
 
-2. `workflow_rules`: A mapping that drives agent routing based on state values.
-   Format: {"field_name": {"state_value": "worker_name", ...}, ...}
-   Example: {"status": {"planning": "planner_worker", "executing": "executor_worker"}}
+Given a user prompt, output a JSON object with:
 
-Keep both outputs minimal and focused on what the prompt actually requires.
+1. `data_schema`: A JSON Schema (draft-07) defining the domain state structure.
+   - Include fields for: task context, current status, intermediate results, final output
+   - Use descriptive field names that reflect the task domain
+   - Add "description" annotations to clarify field purposes
+   - Example fields: "status", "input", "analysis", "plan", "result", "error"
+
+2. `workflow_rules`: State-based routing rules for worker selection.
+   - Format: {"field_name": {"state_value": "worker_name", ...}}
+   - Design a logical flow: analyze → plan → execute → review → done
+   - Use status values like: "analyzing", "planning", "executing", "reviewing", "done"
+   - Each worker should have a clear, single responsibility
+
+3. `worker_instructions`: Instructions for each worker (NEW).
+   - Format: {"worker_name": "Clear instruction on what this worker should do"}
+   - Be specific about inputs, expected outputs, and JSON Patch operations
+   - Example: {"analyzer_worker": "Analyze the user's request and extract key requirements..."}
+
+**Guidelines for handling vague prompts:**
+- If the task type is unclear, default to: analyze → plan → execute → review
+- If details are missing, design workers that can ask for clarification or make reasonable assumptions
+- Always include an "analyzer" or "planner" worker as the first step
+- Include error handling: if a worker fails, route to an "error_handler" or retry
+
+**Example 1 - Travel Planning:**
+User: "帮我规划旅行"
+Output:
+{
+  "data_schema": {
+    "type": "object",
+    "properties": {
+      "user_prompt": {"type": "string"},
+      "status": {"type": "string", "enum": ["analyzing", "planning", "reviewing", "done"]},
+      "destination": {"type": "string"},
+      "duration": {"type": "string"},
+      "plan": {"type": "array", "items": {"type": "string"}},
+      "review": {"type": "string"},
+      "result": {"type": "string"}
+    },
+    "required": ["status"]
+  },
+  "workflow_rules": {
+    "status": {
+      "analyzing": "analyzer_worker",
+      "planning": "planner_worker",
+      "reviewing": "reviewer_worker"
+    }
+  },
+  "worker_instructions": {
+    "analyzer_worker": "Extract travel details from user prompt (destination, duration, preferences). If missing, make reasonable assumptions. Set status to 'planning'.",
+    "planner_worker": "Create a detailed travel itinerary based on extracted details. Set status to 'reviewing'.",
+    "reviewer_worker": "Review the plan for completeness and feasibility. Set status to 'done' and populate 'result'."
+  }
+}
+
+**Example 2 - Data Analysis:**
+User: "分析这些数据"
+Output:
+{
+  "data_schema": {
+    "type": "object",
+    "properties": {
+      "user_prompt": {"type": "string"},
+      "status": {"type": "string", "enum": ["understanding", "analyzing", "summarizing", "done"]},
+      "data_description": {"type": "string"},
+      "analysis": {"type": "object"},
+      "insights": {"type": "array"},
+      "result": {"type": "string"}
+    },
+    "required": ["status"]
+  },
+  "workflow_rules": {
+    "status": {
+      "understanding": "understanding_worker",
+      "analyzing": "analysis_worker",
+      "summarizing": "summary_worker"
+    }
+  },
+  "worker_instructions": {
+    "understanding_worker": "Understand what data analysis is needed. Ask for clarification if needed. Set status to 'analyzing'.",
+    "analysis_worker": "Perform the requested analysis. Extract patterns and insights. Set status to 'summarizing'.",
+    "summary_worker": "Summarize findings in a clear, actionable format. Set status to 'done'."
+  }
+}
+
+**Output Format:**
+ONLY output a valid JSON object with these three keys: data_schema, workflow_rules, worker_instructions.
+No other text or explanation.
 """
 
 
@@ -35,19 +115,41 @@ class ArchitectAgent:
     """
 
     def __init__(self, llm: BaseChatModel) -> None:
-        self._chain = llm.with_structured_output(_ArchitectOutput)
+        self._llm = llm
 
     def __call__(self, state: KernelState) -> dict[str, Any]:
         user_prompt = (state.get("domain_state") or {}).get("user_prompt", "")
 
-        result: _ArchitectOutput = self._chain.invoke([
+        response = self._llm.invoke([
             SystemMessage(content=_SYSTEM_PROMPT),
             HumanMessage(content=f"User prompt: {user_prompt}"),
         ])
 
+        # 解析 JSON 响应
+        try:
+            content = response.content
+            # 尝试提取 JSON（处理可能的 markdown 代码块）
+            if "```json" in content:
+                content = content.split("```json")[1].split("```")[0].strip()
+            elif "```" in content:
+                content = content.split("```")[1].split("```")[0].strip()
+
+            result = json.loads(content)
+            data_schema = result.get("data_schema", {})
+            workflow_rules = result.get("workflow_rules", {})
+            worker_instructions = result.get("worker_instructions", {})
+        except (json.JSONDecodeError, IndexError, AttributeError) as e:
+            # 如果解析失败，返回空的 schema 和 rules
+            print(f"⚠️  Architect 解析失败: {e}")
+            print(f"原始响应: {response.content[:200]}")
+            data_schema = {}
+            workflow_rules = {}
+            worker_instructions = {}
+
         return {
-            "data_schema": result.data_schema,
-            "workflow_rules": result.workflow_rules,
+            "data_schema": data_schema,
+            "workflow_rules": workflow_rules,
+            "worker_instructions": worker_instructions,
             "domain_state": {"user_prompt": user_prompt},
             "pending_patch": [],
             "patch_error": "",
