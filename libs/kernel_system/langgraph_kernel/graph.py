@@ -91,31 +91,30 @@ def build_dynamic_kernel_graph(
             "step_count": 0,
         })
     """
-    builder = StateGraph(KernelState)
+    # 创建通用 worker 节点的 input schema
+    class DynamicInputSchema(TypedDict):
+        domain_state: dict
+        worker_instructions: dict[str, str]
+        current_worker: str
 
-    # 添加 Architect 和 Kernel 节点
-    builder.add_node("architect", ArchitectAgent(llm))
-    builder.add_node("kernel", kernel_node)
+    # 通用 worker 节点
+    def universal_worker_node(state: dict[str, Any]) -> dict[str, Any]:
+        """通用 worker 节点，根据 current_worker 字段执行相应的 worker"""
+        worker_name = state.get("current_worker", "")
+        instruction = state.get("worker_instructions", {}).get(worker_name, "")
 
-    # 创建动态 worker 节点的函数
-    def create_dynamic_worker(worker_name: str):
-        """为指定的 worker 名称创建一个动态 worker 节点"""
-        class DynamicInputSchema(TypedDict):
-            domain_state: dict
-            worker_instructions: dict[str, str]
+        if not instruction:
+            return {
+                "pending_patch": [],
+                "patch_error": f"No instruction found for worker: {worker_name}",
+            }
 
-        def dynamic_worker_node(state: dict[str, Any]) -> dict[str, Any]:
-            # 从状态中获取该 worker 的指令
-            instruction = state.get("worker_instructions", {}).get(worker_name, "")
+        # 创建临时 worker 实例
+        worker = LLMWorkerAgent(llm, instruction=instruction)
+        worker.input_schema = DynamicInputSchema
 
-            # 创建临时 worker 实例
-            worker = LLMWorkerAgent(llm, instruction=instruction)
-            worker.input_schema = DynamicInputSchema
-
-            # 执行 worker
-            return worker(state)
-
-        return dynamic_worker_node, DynamicInputSchema
+        # 执行 worker
+        return worker(state)
 
     # 动态路由函数
     def dynamic_router(state: KernelState) -> str:
@@ -127,12 +126,10 @@ def build_dynamic_kernel_graph(
 
         # 错误处理
         if patch_error:
-            print(f"⚠️  Patch 错误: {patch_error}")
             return END
 
         # 步数限制
         if step_count >= max_steps:
-            print(f"⚠️  达到最大步数 {max_steps}")
             return END
 
         # 遍历 workflow_rules 查找匹配
@@ -140,22 +137,46 @@ def build_dynamic_kernel_graph(
             current_value = domain_state.get(field_name)
             if current_value in rules:
                 worker_name = rules[current_value]
-
-                # 如果 worker 节点不存在，动态创建它
-                if worker_name not in builder.nodes:
-                    worker_node, input_schema = create_dynamic_worker(worker_name)
-                    builder.add_node(worker_name, worker_node, input_schema=input_schema)
-                    builder.add_edge(worker_name, "kernel")
-                    print(f"🔧 动态创建 worker: {worker_name}")
-
-                return worker_name
+                # 返回 "worker" 节点，并在状态中设置 current_worker
+                return "worker"
 
         # 无匹配规则，结束
         return END
 
+    # 设置 current_worker 的中间节点
+    def set_current_worker(state: KernelState) -> dict[str, Any]:
+        """在路由到 worker 之前，设置 current_worker 字段"""
+        workflow_rules = state.get("workflow_rules", {})
+        domain_state = state.get("domain_state", {})
+
+        for field_name, rules in workflow_rules.items():
+            current_value = domain_state.get(field_name)
+            if current_value in rules:
+                worker_name = rules[current_value]
+                return {"current_worker": worker_name}
+
+        return {"current_worker": ""}
+
+    builder = StateGraph(KernelState)
+
+    # 添加节点
+    builder.add_node("architect", ArchitectAgent(llm))
+    builder.add_node("kernel", kernel_node)
+    builder.add_node("set_worker", set_current_worker)
+    builder.add_node("worker", universal_worker_node, input_schema=DynamicInputSchema)
+
     # 添加边
     builder.add_edge(START, "architect")
     builder.add_edge("architect", "kernel")
-    builder.add_conditional_edges("kernel", dynamic_router)
+
+    # 条件边：从 kernel 到 set_worker 或 END
+    builder.add_conditional_edges(
+        "kernel",
+        dynamic_router,
+        {"worker": "set_worker", END: END}
+    )
+
+    builder.add_edge("set_worker", "worker")
+    builder.add_edge("worker", "kernel")
 
     return builder.compile(checkpointer=checkpointer)

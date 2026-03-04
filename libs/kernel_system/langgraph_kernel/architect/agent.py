@@ -146,11 +146,23 @@ class ArchitectAgent:
             workflow_rules = {}
             worker_instructions = {}
 
+        # 初始化 domain_state，包括 user_prompt 和初始状态
+        domain_state = {"user_prompt": user_prompt}
+
+        # 从 workflow_rules 中找到第一个状态字段和初始值
+        if workflow_rules:
+            for field_name, transitions in workflow_rules.items():
+                if transitions:
+                    # 使用第一个转换的状态值作为初始状态
+                    initial_value = list(transitions.keys())[0]
+                    domain_state[field_name] = initial_value
+                    break
+
         return {
             "data_schema": data_schema,
             "workflow_rules": workflow_rules,
             "worker_instructions": worker_instructions,
-            "domain_state": {"user_prompt": user_prompt},
+            "domain_state": domain_state,
             "pending_patch": [],
             "patch_error": "",
             "step_count": 0,

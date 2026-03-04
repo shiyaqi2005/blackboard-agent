@@ -42,3 +42,8 @@ class KernelState(TypedDict):
     pending_patch: JsonPatch   # worker 提交的 patch，等待 kernel 验证
     patch_error: str           # 验证失败时的错误信息，空字符串表示无错误
     step_count: int            # 已执行步数，防止无限循环
+    current_worker: str        # 当前要执行的 worker 名称（用于动态图）
+
+    # Layer 5: 反馈重试
+    retry_count: int           # 当前 worker 的重试次数
+    error_feedback: str        # 反馈给 worker 的错误信息
