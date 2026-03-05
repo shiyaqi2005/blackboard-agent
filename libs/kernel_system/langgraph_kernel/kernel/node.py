@@ -235,6 +235,11 @@ def kernel_node(state: KernelState) -> dict:
         # 保留最近 5 个状态
         status_history = (status_history + [current_status])[-5:]
 
+    # 保存中间状态快照（完整保留所有历史）
+    import copy
+    state_history = state.get("state_history", [])
+    state_history.append(copy.deepcopy(new_state))
+
     return {
         "domain_state": new_state,
         "pending_patch": [],
@@ -244,4 +249,5 @@ def kernel_node(state: KernelState) -> dict:
         "error_feedback": "",  # 清空错误反馈
         "no_update_count": 0,  # 重置无更新计数（因为有有效更新）
         "status_history": status_history,
+        "state_history": state_history,  # 保存完整的状态历史
     }

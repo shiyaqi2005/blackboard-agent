@@ -53,6 +53,7 @@ def run_interactive_system(prompt: str, model: str = "deepseek-v3", verbose: boo
         "current_worker": "",
         "retry_count": 0,
         "error_feedback": "",
+        "state_history": [],  # 初始化状态历史
     }
 
     print("=" * 80)

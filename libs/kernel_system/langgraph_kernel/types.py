@@ -51,3 +51,6 @@ class KernelState(TypedDict):
     # 终止检测
     no_update_count: int       # 连续无有效更新的次数（用于检测 worker 无实质工作）
     status_history: List[str]  # 最近的状态历史（用于检测循环）
+
+    # 中间状态持久化：保留所有历史状态快照
+    state_history: List[Dict[str, Any]]  # 每一步的 domain_state 快照

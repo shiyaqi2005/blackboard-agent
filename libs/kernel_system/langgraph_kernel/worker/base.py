@@ -21,10 +21,12 @@ class BaseWorkerAgent(ABC):
 
     def __call__(self, state: dict[str, Any]) -> dict[str, Any]:
         # 传递 domain_state 以及 Layer 5 的反馈信息
+        # 同时传递 data_schema 用于类型检查
         context = {
             **state.get("domain_state", {}),
             "error_feedback": state.get("error_feedback", ""),
             "retry_count": state.get("retry_count", 0),
+            "_data_schema": state.get("data_schema", {}),  # 添加 schema 信息
         }
         patch = self._think(context)
         return {"pending_patch": patch}
@@ -62,9 +64,33 @@ class LLMWorkerAgent(BaseWorkerAgent):
         # 如果有动态指令，使用它；否则使用默认 system_prompt
         system_content = self._instruction if self._instruction else self.system_prompt
 
+        # 提取 schema 信息用于类型指导
+        data_schema = context.get("_data_schema", {})
+        schema_properties = data_schema.get("properties", {})
+
+        # 构建类型提示
+        type_hints = ""
+        if schema_properties:
+            type_hints = "\n\n**CRITICAL - Field Type Requirements:**\n"
+            type_hints += "You MUST match these exact types when creating patches:\n"
+            for field_name, field_schema in schema_properties.items():
+                field_type = field_schema.get("type", "unknown")
+                if field_type == "array":
+                    items_type = field_schema.get("items", {}).get("type", "any")
+                    type_hints += f"  • {field_name}: array of {items_type}\n"
+                elif field_type == "object":
+                    type_hints += f"  • {field_name}: object (structured data)\n"
+                else:
+                    type_hints += f"  • {field_name}: {field_type}\n"
+            type_hints += "\n**Type Mismatch = Validation Error!**\n"
+            type_hints += "- If schema says 'string', return a string (e.g., \"text here\")\n"
+            type_hints += "- If schema says 'array', return an array (e.g., [\"item1\", \"item2\"])\n"
+            type_hints += "- If schema says 'object', return an object (e.g., {{\"key\": \"value\"}})\n"
+
         # 增强 system prompt，包含更多上下文
         # 构建增强的 prompt（避免 f-string 中的花括号冲突）
         enhanced_prompt = f"""{system_content}
+{type_hints}
 
 IMPORTANT: You must return a JSON Patch array (RFC 6902 format).
 Each operation should have: "op" (add/replace/remove), "path" (JSON pointer), "value" (for add/replace).

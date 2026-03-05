@@ -24,12 +24,16 @@ Given a user prompt, output a JSON object with:
    - Add "description" annotations to clarify field purposes
    - Example fields: "status", "input", "analysis", "plan", "result", "error"
 
-   **IMPORTANT - Schema Design Guidelines:**
-   - Use appropriate types: "string" for simple text, "object" for structured data, "array" for lists
-   - For complex data (outlines, plans, structured content), use "object" or "array" types
-   - Avoid using "string" for data that should be structured (like outlines, lists, nested content)
-   - Example: For an outline, use {"type": "array", "items": {"type": "object"}} instead of {"type": "string"}
-   - When in doubt, prefer structured types (object/array) over string
+   **CRITICAL - Schema Design Guidelines (Type Safety):**
+   - **Default to "string" type for ALL fields unless absolutely necessary**
+   - Only use "object" or "array" if the data MUST be structured (e.g., a list of items with multiple properties)
+   - **IMPORTANT**: Workers often return simple text descriptions - use "string" to avoid type errors
+   - Use "string" for: descriptions, summaries, plans (as text), analysis results, recommendations
+   - Use "array" ONLY for: lists of simple items (e.g., ["item1", "item2"]) - use {"type": "array", "items": {"type": "string"}}
+   - Use "object" ONLY for: truly structured data with known properties
+   - **When in doubt, use "string"** - it's safer and more flexible
+   - Example GOOD: {"plan": {"type": "string"}} - allows text description
+   - Example BAD: {"plan": {"type": "array"}} - forces structured format, causes errors
 
 2. `workflow_rules`: State-based routing rules for worker selection.
    - Format: {"field_name": {"state_value": "worker_name", ...}}

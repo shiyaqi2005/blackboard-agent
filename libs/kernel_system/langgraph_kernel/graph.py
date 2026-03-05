@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict
 
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -94,8 +94,9 @@ def build_dynamic_kernel_graph(
     # 创建通用 worker 节点的 input schema
     class DynamicInputSchema(TypedDict):
         domain_state: dict
-        worker_instructions: dict[str, str]
+        worker_instructions: Dict[str, str]
         current_worker: str
+        data_schema: dict  # 添加 schema 信息用于类型检查
 
     # 通用 worker 节点
     def universal_worker_node(state: dict[str, Any]) -> dict[str, Any]:
