@@ -24,16 +24,27 @@ Given a user prompt, output a JSON object with:
    - Add "description" annotations to clarify field purposes
    - Example fields: "status", "input", "analysis", "plan", "result", "error"
 
+   **IMPORTANT - Schema Design Guidelines:**
+   - Use appropriate types: "string" for simple text, "object" for structured data, "array" for lists
+   - For complex data (outlines, plans, structured content), use "object" or "array" types
+   - Avoid using "string" for data that should be structured (like outlines, lists, nested content)
+   - Example: For an outline, use {"type": "array", "items": {"type": "object"}} instead of {"type": "string"}
+   - When in doubt, prefer structured types (object/array) over string
+
 2. `workflow_rules`: State-based routing rules for worker selection.
    - Format: {"field_name": {"state_value": "worker_name", ...}}
    - Design a logical flow: analyze → plan → execute → review → done
    - Use status values like: "analyzing", "planning", "executing", "reviewing", "done"
    - Each worker should have a clear, single responsibility
+   - **IMPORTANT**: Use null (or "END" or "") for terminal states to explicitly end the workflow
+   - Example: {"status": {"analyzing": "analyzer", "planning": "planner", "done": null}}
 
 3. `worker_instructions`: Instructions for each worker (NEW).
    - Format: {"worker_name": "Clear instruction on what this worker should do"}
    - Be specific about inputs, expected outputs, and JSON Patch operations
-   - Example: {"analyzer_worker": "Analyze the user's request and extract key requirements..."}
+   - **CRITICAL**: Workers should ONLY update business data fields, NOT the status field
+   - The Kernel will automatically handle status transitions based on workflow_rules
+   - Example: {"analyzer_worker": "Analyze the user's request and extract key requirements into the 'requirements' field..."}
 
 **Guidelines for handling vague prompts:**
 - If the task type is unclear, default to: analyze → plan → execute → review
@@ -52,7 +63,7 @@ Output:
       "status": {"type": "string", "enum": ["analyzing", "planning", "reviewing", "done"]},
       "destination": {"type": "string"},
       "duration": {"type": "string"},
-      "plan": {"type": "array", "items": {"type": "string"}},
+      "plan": {"type": "array", "items": {"type": "object"}},  // Use object for structured data
       "review": {"type": "string"},
       "result": {"type": "string"}
     },
@@ -62,13 +73,14 @@ Output:
     "status": {
       "analyzing": "analyzer_worker",
       "planning": "planner_worker",
-      "reviewing": "reviewer_worker"
+      "reviewing": "reviewer_worker",
+      "done": null
     }
   },
   "worker_instructions": {
-    "analyzer_worker": "Extract travel details from user prompt (destination, duration, preferences). If missing, make reasonable assumptions. Set status to 'planning'.",
-    "planner_worker": "Create a detailed travel itinerary based on extracted details. Set status to 'reviewing'.",
-    "reviewer_worker": "Review the plan for completeness and feasibility. Set status to 'done' and populate 'result'."
+    "analyzer_worker": "Extract travel details from user prompt (destination, duration, preferences). If missing, make reasonable assumptions. Update the 'destination' and 'duration' fields.",
+    "planner_worker": "Create a detailed travel itinerary based on extracted details. Update the 'plan' field with structured itinerary data.",
+    "reviewer_worker": "Review the plan for completeness and feasibility. Update the 'review' and 'result' fields with your assessment and final recommendations."
   }
 }
 
@@ -92,13 +104,14 @@ Output:
     "status": {
       "understanding": "understanding_worker",
       "analyzing": "analysis_worker",
-      "summarizing": "summary_worker"
+      "summarizing": "summary_worker",
+      "done": null
     }
   },
   "worker_instructions": {
-    "understanding_worker": "Understand what data analysis is needed. Ask for clarification if needed. Set status to 'analyzing'.",
-    "analysis_worker": "Perform the requested analysis. Extract patterns and insights. Set status to 'summarizing'.",
-    "summary_worker": "Summarize findings in a clear, actionable format. Set status to 'done'."
+    "understanding_worker": "Understand what data analysis is needed. Ask for clarification if needed. Update the 'data_description' field with your understanding.",
+    "analysis_worker": "Perform the requested analysis. Extract patterns and insights. Update the 'analysis' and 'insights' fields with your findings.",
+    "summary_worker": "Summarize findings in a clear, actionable format. Update the 'result' field with the final summary."
   }
 }
 
@@ -166,4 +179,8 @@ class ArchitectAgent:
             "pending_patch": [],
             "patch_error": "",
             "step_count": 0,
+            "retry_count": 0,
+            "error_feedback": "",
+            "no_update_count": 0,
+            "status_history": [],
         }

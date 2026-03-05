@@ -64,10 +64,6 @@ class LLMWorkerAgent(BaseWorkerAgent):
 
         # 增强 system prompt，包含更多上下文
         # 构建增强的 prompt（避免 f-string 中的花括号冲突）
-        example_patches = """- [{"op": "replace", "path": "/status", "value": "planning"}]
-- [{"op": "add", "path": "/plan", "value": ["step1", "step2"]}]
-- [{"op": "replace", "path": "/status", "value": "done"}, {"op": "add", "path": "/result", "value": "Final output"}]"""
-
         enhanced_prompt = f"""{system_content}
 
 IMPORTANT: You must return a JSON Patch array (RFC 6902 format).
@@ -75,17 +71,30 @@ Each operation should have: "op" (add/replace/remove), "path" (JSON pointer), "v
 
 Guidelines:
 - The current state you see is the domain_state
-- All JSON Patch paths should start from the root, e.g., "/status", "/plan", "/result"
+- All JSON Patch paths should start from the root, e.g., "/destination", "/plan", "/result"
 - Use "add" for NEW fields that don't exist yet
 - Use "replace" for EXISTING fields that need to be updated
 - Analyze the current state carefully
 - Make incremental, logical changes
-- Always update the "status" field to indicate next step
-- If you need more information, you can add a "clarification_needed" field
 - Keep changes minimal and focused
+- **DO NOT update the "status" field** - the Kernel will handle state transitions automatically
 
-Example patches:
-{example_patches}
+CRITICAL - ABSOLUTE RULES:
+1. **NEVER update the "status" field** - Any status updates will be REJECTED by the Kernel
+2. **ONLY update business data fields** relevant to your specific task
+3. Your patches MUST contain meaningful business data (content, plan, analysis, results, etc.)
+4. If you only return status updates, your work will be COMPLETELY FILTERED OUT
+
+The Kernel controls all state transitions automatically. Your job is ONLY to provide business data.
+
+Examples of CORRECT patches (business data):
+- Writing task: [{{"op": "add", "path": "/content", "value": "人工智能是计算机科学的一个分支..."}}]
+- Planning task: [{{"op": "add", "path": "/plan", "value": [{{"step": 1, "action": "Research"}}]}}]
+- Analysis task: [{{"op": "add", "path": "/insights", "value": ["Finding 1", "Finding 2"]}}]
+
+Examples of WRONG patches (will be filtered):
+- [{{"op": "replace", "path": "/status", "value": "done"}}]  ❌ REJECTED - No business data!
+- [{{"op": "replace", "path": "/status", "value": "planning"}}]  ❌ REJECTED - Status updates forbidden!
 
 Output ONLY the JSON array, no explanations."""
 
@@ -103,7 +112,11 @@ Previous Error Report:
 
 Please fix these issues:
 1. Check that all paths exist before using "replace" (use "add" for new fields)
-2. Ensure all values match the expected types in the schema
+2. **CRITICAL: Ensure all values match the EXACT types defined in the schema**
+   - If schema says "string", provide a string (not object or array)
+   - If schema says "array", provide an array
+   - If schema says "object", provide an object
+   - Do NOT try to be creative with types - follow the schema strictly
 3. If using enum fields, use ONLY the allowed values from the schema
 4. Double-check the JSON Patch syntax
 

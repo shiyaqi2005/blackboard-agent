@@ -116,31 +116,24 @@ def build_dynamic_kernel_graph(
         # 执行 worker
         return worker(state)
 
-    # 动态路由函数
+    # 动态路由：使用 WorkflowRouter 实现三层终止机制
+    # 注意：这里 worker_names 是动态的，所以我们传入一个空列表
+    # Router 会根据 workflow_rules 动态匹配
+    router = WorkflowRouter(
+        worker_names=[],  # 动态 worker，不预定义
+        max_steps=max_steps,
+        max_no_update=2,
+        loop_detection_window=3,
+    )
+
     def dynamic_router(state: KernelState) -> str:
         """根据 workflow_rules 动态路由到 worker"""
-        workflow_rules = state.get("workflow_rules", {})
-        domain_state = state.get("domain_state", {})
-        patch_error = state.get("patch_error", "")
-        step_count = state.get("step_count", 0)
+        # 使用 WorkflowRouter 的路由逻辑
+        result = router.route(state)
 
-        # 错误处理
-        if patch_error:
-            return END
-
-        # 步数限制
-        if step_count >= max_steps:
-            return END
-
-        # 遍历 workflow_rules 查找匹配
-        for field_name, rules in workflow_rules.items():
-            current_value = domain_state.get(field_name)
-            if current_value in rules:
-                worker_name = rules[current_value]
-                # 返回 "worker" 节点，并在状态中设置 current_worker
-                return "worker"
-
-        # 无匹配规则，结束
+        # 如果 router 返回的是 worker 名称（而不是 END），返回 "worker" 节点
+        if result != END:
+            return "worker"
         return END
 
     # 设置 current_worker 的中间节点

@@ -1,11 +1,8 @@
 """
 交互式 Architect-Kernel-Worker 系统演示
 
-实时显示系统执行过程中的状态变化，包括：
-- Architect 设计的 schema 和 workflow
-- 每个 worker 的执行
-- 状态更新
-- 最终结果
+清晰展示系统执行过程：
+【步骤 N】模块名：执行内容
 """
 import json
 import sys
@@ -17,38 +14,6 @@ from langgraph_kernel import build_dynamic_kernel_graph
 from langgraph_kernel.llm_wrapper import SimpleChatModel
 
 
-class SystemMonitor:
-    """监控系统执行过程"""
-
-    def __init__(self):
-        self.step = 0
-
-    def print_header(self, title: str):
-        """打印标题"""
-        print("\n" + "=" * 80)
-        print(f"  {title}")
-        print("=" * 80)
-
-    def print_section(self, title: str, emoji: str = "📋"):
-        """打印章节"""
-        print(f"\n{emoji} {title}")
-        print("-" * 80)
-
-    def print_json(self, data: Any, indent: int = 2):
-        """打印 JSON 数据"""
-        print(json.dumps(data, indent=indent, ensure_ascii=False))
-
-    def print_state_update(self, old_state: dict, new_state: dict):
-        """打印状态变化"""
-        print("\n🔄 状态变化:")
-        for key, new_value in new_state.items():
-            old_value = old_state.get(key)
-            if old_value != new_value:
-                print(f"  • {key}:")
-                print(f"      旧值: {old_value}")
-                print(f"      新值: {new_value}")
-
-
 def run_interactive_system(prompt: str, model: str = "deepseek-v3", verbose: bool = True):
     """
     运行交互式系统
@@ -58,12 +23,11 @@ def run_interactive_system(prompt: str, model: str = "deepseek-v3", verbose: boo
         model: 使用的模型名称
         verbose: 是否显示详细信息
     """
-    monitor = SystemMonitor()
-
-    # 打印用户输入
-    monitor.print_header("🚀 启动 Architect-Kernel-Worker 系统")
+    print("=" * 80)
+    print("  🚀 Architect-Kernel-Worker 系统")
+    print("=" * 80)
     print(f"\n📝 用户输入: {prompt}")
-    print(f"🤖 使用模型: {model}")
+    print(f"🤖 使用模型: {model}\n")
 
     # 配置 LLM
     llm = SimpleChatModel(
@@ -71,10 +35,10 @@ def run_interactive_system(prompt: str, model: str = "deepseek-v3", verbose: boo
         api_key="sk-2OsXSnW0fVfpFVnT4HeOkGDue8bxgRflUSc9KqCx7mnNOTgb",
         base_url="https://tb.api.mkeai.com/v1",
         temperature=0.7,
+        timeout=60.0,  # 设置 60 秒超时
     )
 
     # 构建图
-    print("\n⚙️  构建动态图...")
     graph = build_dynamic_kernel_graph(llm, max_steps=15)
 
     # 初始状态
@@ -91,131 +55,169 @@ def run_interactive_system(prompt: str, model: str = "deepseek-v3", verbose: boo
         "error_feedback": "",
     }
 
-    # 使用 stream 模式执行，实时显示每个节点的输出
-    monitor.print_header("📊 系统执行过程")
+    print("=" * 80)
+    print("  执行过程")
+    print("=" * 80)
 
+    step_number = 0
     current_state = initial_state.copy()
-    node_count = 0
+
+    # 用于跟踪实际的业务步骤（排除内部节点）
+    business_step = 0
 
     try:
         for event in graph.stream(initial_state, stream_mode="updates"):
-            node_count += 1
-
-            # 获取节点名称和输出
             node_name = list(event.keys())[0]
             node_output = event[node_name]
 
-            # 打印节点信息
+            # 跳过内部节点 set_worker
+            if node_name == "set_worker":
+                current_state.update(node_output)
+                continue
+
+            step_number += 1
+
+            # 根据节点类型显示不同信息
             if node_name == "architect":
-                monitor.print_section(f"🏗️  步骤 {node_count}: Architect Agent 设计系统", "🏗️")
+                business_step += 1
+                print(f"\n【步骤 {business_step}】Architect: 分析用户需求并设计系统架构")
 
                 if verbose and "data_schema" in node_output:
-                    print("\n📐 Data Schema:")
                     schema = node_output["data_schema"]
                     if "properties" in schema:
-                        print(f"  字段数: {len(schema['properties'])}")
-                        for field_name, field_def in schema["properties"].items():
-                            field_type = field_def.get("type", "unknown")
-                            print(f"    • {field_name}: {field_type}")
-                    else:
-                        monitor.print_json(schema, indent=2)
+                        field_count = len(schema["properties"])
+                        print(f"  • 设计了 {field_count} 个状态字段")
 
                 if verbose and "workflow_rules" in node_output:
-                    print("\n🔀 Workflow Rules:")
                     rules = node_output["workflow_rules"]
-                    for field, transitions in rules.items():
-                        print(f"  {field}:")
-                        for value, worker in transitions.items():
-                            print(f"    {value} → {worker}")
+                    worker_count = len(set(w for r in rules.values() for w in r.values()))
+                    print(f"  • 设计了 {worker_count} 个 worker")
 
-                if verbose and "worker_instructions" in node_output:
-                    print("\n👷 Worker Instructions:")
-                    instructions = node_output["worker_instructions"]
-                    for worker_name, instruction in instructions.items():
-                        print(f"  • {worker_name}:")
-                        # 截断过长的指令
-                        if len(instruction) > 100:
-                            print(f"    {instruction[:100]}...")
-                        else:
-                            print(f"    {instruction}")
+                if verbose and "domain_state" in node_output:
+                    domain = node_output["domain_state"]
+                    if "status" in domain:
+                        print(f"  • 初始状态: {domain['status']}")
 
             elif node_name == "kernel":
-                monitor.print_section(f"⚙️  步骤 {node_count}: Kernel 验证和更新状态", "⚙️")
-
-                # 显示步数
+                # Kernel 不单独计数，它是验证和状态转换的中间步骤
                 step_count = node_output.get("step_count", 0)
-                print(f"  当前步数: {step_count}")
 
-                # 显示错误
+                # 检查是否有状态变化
+                old_status = current_state.get("domain_state", {}).get("status", "")
+                new_status = node_output.get("domain_state", {}).get("status", "")
+
+                if new_status and new_status != old_status:
+                    print(f"  → Kernel: 验证通过，状态转换 {old_status} → {new_status}")
+
+                # 检查错误
                 if node_output.get("patch_error"):
-                    print(f"  ❌ 错误: {node_output['patch_error']}")
+                    print(f"  → Kernel: ❌ 验证失败 - {node_output['patch_error'][:80]}...")
 
-                # 显示状态变化
-                if "domain_state" in node_output and verbose:
-                    new_domain = node_output["domain_state"]
-                    old_domain = current_state.get("domain_state", {})
+            elif node_name == "worker":
+                # 获取当前 worker 名称
+                worker_name = current_state.get("current_worker", "unknown")
+                business_step += 1
 
-                    # 找出变化的字段
-                    changed_fields = []
-                    for key in set(list(old_domain.keys()) + list(new_domain.keys())):
-                        if old_domain.get(key) != new_domain.get(key):
-                            changed_fields.append(key)
+                # 获取 worker 的指令来理解它的任务
+                instructions = current_state.get("worker_instructions", {})
+                instruction = instructions.get(worker_name, "")
 
-                    if changed_fields:
-                        print(f"  📝 更新字段: {', '.join(changed_fields)}")
+                # 提取任务描述（取第一句话）
+                task_desc = instruction.split('.')[0] if instruction else "执行任务"
+                if len(task_desc) > 60:
+                    task_desc = task_desc[:60] + "..."
 
-            else:
-                # Worker 节点
-                monitor.print_section(f"🔧 步骤 {node_count}: Worker '{node_name}' 执行", "🔧")
+                print(f"\n【步骤 {business_step}】{worker_name}: {task_desc}")
 
+                # 显示提交的 patch
                 if verbose and "pending_patch" in node_output:
                     patch = node_output["pending_patch"]
                     if patch:
-                        print(f"  提交 {len(patch)} 个 patch 操作:")
-                        for i, op in enumerate(patch[:3], 1):  # 只显示前3个
-                            print(f"    {i}. {op.get('op')} {op.get('path')}")
-                        if len(patch) > 3:
-                            print(f"    ... 还有 {len(patch) - 3} 个操作")
+                        print(f"  • 提交了 {len(patch)} 个状态更新")
+
+                        # 显示每个 patch 操作的内容
+                        for i, op in enumerate(patch, 1):
+                            op_type = op.get("op", "unknown")
+                            path = op.get("path", "")
+                            value = op.get("value")
+
+                            # 提取字段名
+                            field_name = path.split("/")[-1] if "/" in path else path
+
+                            if op_type in ["add", "replace"]:
+                                # 格式化显示值
+                                if isinstance(value, str):
+                                    # 字符串：如果太长则截断
+                                    if len(value) > 100:
+                                        print(f"    {i}. {op_type} {field_name}: {value[:100]}...")
+                                    else:
+                                        print(f"    {i}. {op_type} {field_name}: {value}")
+                                elif isinstance(value, (list, dict)):
+                                    # 列表或对象：显示类型和大小
+                                    if isinstance(value, list):
+                                        print(f"    {i}. {op_type} {field_name}: [列表，{len(value)} 项]")
+                                    else:
+                                        print(f"    {i}. {op_type} {field_name}: {{对象，{len(value)} 个字段}}")
+                                else:
+                                    # 其他类型：直接显示
+                                    print(f"    {i}. {op_type} {field_name}: {value}")
+                            elif op_type == "remove":
+                                print(f"    {i}. remove {field_name}")
 
             # 更新当前状态
             current_state.update(node_output)
 
-            # 显示当前关键状态
-            if "domain_state" in current_state:
-                domain = current_state["domain_state"]
-                if "status" in domain:
-                    print(f"  📍 当前状态: {domain['status']}")
-
         # 显示最终结果
-        monitor.print_header("✅ 执行完成")
+        print("\n" + "=" * 80)
+        print("  最终结果")
+        print("=" * 80)
 
         final_state = current_state
-
-        print(f"\n📊 执行统计:")
-        print(f"  • 总步数: {final_state.get('step_count', 0)}")
-        print(f"  • 节点数: {node_count}")
-        print(f"  • 错误: {final_state.get('patch_error') or '无'}")
-
-        monitor.print_section("📋 最终状态", "📋")
         domain_state = final_state.get("domain_state", {})
 
-        # 排除 user_prompt，显示其他字段
-        for key, value in domain_state.items():
-            if key != "user_prompt":
-                print(f"\n{key}:")
-                if isinstance(value, (list, dict)):
-                    monitor.print_json(value, indent=2)
-                else:
-                    print(f"  {value}")
+        # 显示执行统计
+        print(f"\n📊 执行统计:")
+        print(f"  • 总步数: {final_state.get('step_count', 0)}")
+        print(f"  • 最终状态: {domain_state.get('status', '未知')}")
+        error = final_state.get('patch_error')
+        print(f"  • 错误: {error if error else '无'}")
 
-        # 如果有 result 字段，特别突出显示
-        if "result" in domain_state:
-            monitor.print_section("🎯 最终结果", "🎯")
-            result = domain_state["result"]
-            if isinstance(result, str):
-                print(result)
+        # 显示业务数据（排除 user_prompt 和 status）
+        print(f"\n📋 生成的内容:")
+        has_content = False
+        for key, value in domain_state.items():
+            if key in ["user_prompt", "status", "error_feedback", "retry_count"]:
+                continue
+
+            has_content = True
+            print(f"\n  {key}:")
+
+            if isinstance(value, dict):
+                # 格式化显示字典
+                print(json.dumps(value, indent=4, ensure_ascii=False))
+            elif isinstance(value, list):
+                if len(value) > 0:
+                    # 如果是对象列表，格式化显示
+                    if isinstance(value[0], dict):
+                        print(json.dumps(value, indent=4, ensure_ascii=False))
+                    else:
+                        # 简单列表，逐行显示
+                        for i, item in enumerate(value, 1):
+                            print(f"    {i}. {item}")
+                else:
+                    print("    (空)")
             else:
-                monitor.print_json(result)
+                # 字符串或其他类型
+                value_str = str(value)
+                if len(value_str) > 500:
+                    print(f"    {value_str[:500]}...")
+                else:
+                    print(f"    {value_str}")
+
+        if not has_content:
+            print("  (无业务数据)")
+
+        print("\n" + "=" * 80)
 
         return final_state
 
@@ -223,9 +225,30 @@ def run_interactive_system(prompt: str, model: str = "deepseek-v3", verbose: boo
         print("\n\n⚠️  用户中断执行")
         return current_state
     except Exception as e:
-        print(f"\n\n❌ 执行出错: {e}")
-        import traceback
-        traceback.print_exc()
+        error_msg = str(e)
+        print(f"\n\n❌ 执行出错: {error_msg}")
+
+        # 针对不同类型的错误给出建议
+        if "timed out" in error_msg.lower() or "timeout" in error_msg.lower():
+            print("\n💡 建议:")
+            print("  1. 检查网络连接是否正常")
+            print("  2. API 服务可能繁忙，请稍后重试")
+            print("  3. 尝试使用更简单的 prompt")
+        elif "connection" in error_msg.lower():
+            print("\n💡 建议:")
+            print("  1. 检查网络连接")
+            print("  2. 检查 API 地址是否正确")
+            print("  3. 检查防火墙设置")
+        elif "api" in error_msg.lower() or "key" in error_msg.lower():
+            print("\n💡 建议:")
+            print("  1. 检查 API Key 是否有效")
+            print("  2. 检查 API 配额是否用尽")
+
+        if verbose:
+            print("\n详细错误信息:")
+            import traceback
+            traceback.print_exc()
+
         return current_state
 
 
@@ -253,6 +276,8 @@ def main():
     # 询问是否显示详细信息
     verbose_input = input("\n是否显示详细执行过程? (y/n, 默认 y): ").strip().lower()
     verbose = verbose_input != 'n'
+
+    print()  # 空行
 
     # 运行系统
     run_interactive_system(user_prompt, verbose=verbose)

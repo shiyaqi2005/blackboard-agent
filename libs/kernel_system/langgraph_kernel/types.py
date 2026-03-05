@@ -47,3 +47,7 @@ class KernelState(TypedDict):
     # Layer 5: 反馈重试
     retry_count: int           # 当前 worker 的重试次数
     error_feedback: str        # 反馈给 worker 的错误信息
+
+    # 终止检测
+    no_update_count: int       # 连续无有效更新的次数（用于检测 worker 无实质工作）
+    status_history: List[str]  # 最近的状态历史（用于检测循环）

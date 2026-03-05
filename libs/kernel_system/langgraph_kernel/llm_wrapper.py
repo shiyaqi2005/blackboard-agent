@@ -21,6 +21,7 @@ class SimpleChatModel(BaseChatModel):
     client: Any = None
     model: str = "gpt-3.5-turbo"
     temperature: float = 0.7
+    timeout: float = 60.0  # 默认 60 秒超时
 
     def __init__(
         self,
@@ -28,12 +29,14 @@ class SimpleChatModel(BaseChatModel):
         base_url: str,
         model: str = "gpt-3.5-turbo",
         temperature: float = 0.7,
+        timeout: float = 60.0,
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.client = OpenAI(api_key=api_key, base_url=base_url, timeout=timeout)
         self.model = model
         self.temperature = temperature
+        self.timeout = timeout
 
     def _generate(
         self,

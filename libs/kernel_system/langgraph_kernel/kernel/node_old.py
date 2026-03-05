@@ -74,7 +74,8 @@ def _determine_next_status(
     if current_index + 1 < len(status_list):
         return status_list[current_index + 1]
 
-    # 如果是最后一个状态，返回 None
+    # 如果是最后一个状态，检查是否有 "done" 状态
+    # 如果没有，返回 None（保持当前状态）
     return None
 
 
