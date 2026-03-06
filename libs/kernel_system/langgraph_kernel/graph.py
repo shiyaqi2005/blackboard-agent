@@ -1,78 +1,33 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from typing_extensions import TypedDict
 
-from langgraph_kernel.architect.agent import ArchitectAgent
+from langgraph_kernel.architect.orchestrator import OrchestratorArchitect
 from langgraph_kernel.kernel.node import kernel_node
 from langgraph_kernel.kernel.router import WorkflowRouter
 from langgraph_kernel.types import KernelState
-from langgraph_kernel.worker.base import BaseWorkerAgent, LLMWorkerAgent
+from langgraph_kernel.worker.registry import get_registry
 
 
 def build_kernel_graph(
     llm: BaseChatModel,
-    workers: dict[str, BaseWorkerAgent],
     max_steps: int = 50,
     checkpointer: BaseCheckpointSaver | None = None,
 ) -> Any:
     """
-    组装完整的 Architect-Kernel-Worker 图。
-
-    图结构：
-        START → architect → kernel → [router] → worker_X → kernel → ...
-                                              → END
-
-    参数：
-        llm: 兼容 OpenAI 格式的第三方模型，用于 Architect 和 LLM workers
-        workers: {worker_name: worker_instance} 字典
-        max_steps: 最大执行步数，防止无限循环
-        checkpointer: 可选的检查点保存器（如 InMemorySaver）
-    """
-    builder = StateGraph(KernelState)
-
-    # 节点
-    builder.add_node("architect", ArchitectAgent(llm))
-    builder.add_node("kernel", kernel_node)
-
-    for name, worker in workers.items():
-        if worker.input_schema is not None:
-            builder.add_node(name, worker, input_schema=worker.input_schema)
-        else:
-            builder.add_node(name, worker)
-
-    # 边
-    builder.add_edge(START, "architect")
-    builder.add_edge("architect", "kernel")
-
-    router = WorkflowRouter(list(workers.keys()), max_steps=max_steps)
-    builder.add_conditional_edges("kernel", router.route)
-
-    for name in workers:
-        builder.add_edge(name, "kernel")
-
-    return builder.compile(checkpointer=checkpointer)
-
-
-def build_dynamic_kernel_graph(
-    llm: BaseChatModel,
-    max_steps: int = 50,
-    checkpointer: BaseCheckpointSaver | None = None,
-) -> Any:
-    """
-    构建动态 Architect-Kernel-Worker 图（无需预定义 workers）。
+    构建编排型 Architect-Kernel-Worker 图（使用固定 Worker 类型）。
 
     工作流程：
-    1. Architect 分析用户 prompt，生成 data_schema、workflow_rules 和 worker_instructions
-    2. 系统根据 worker_instructions 动态创建 LLM workers
-    3. Kernel 根据 workflow_rules 路由到相应的 worker
-    4. Workers 根据 Architect 提供的指令执行任务
-
-    这种方式可以处理任意类型的模糊 prompt，无需预先定义 worker 类型。
+    1. Orchestrator Architect 分析用户 prompt，拆分任务
+    2. 从 Worker Registry 中选择合适的 workers
+    3. 生成 data_schema 和 workflow_rules 来编排这些 workers
+    4. Kernel 根据 workflow_rules 路由到相应的 worker
+    5. Workers 使用预定义的 system_prompt 执行任务
 
     参数：
         llm: 兼容 OpenAI 格式的第三方模型
@@ -80,46 +35,50 @@ def build_dynamic_kernel_graph(
         checkpointer: 可选的检查点保存器
 
     示例：
-        graph = build_dynamic_kernel_graph(llm)
+        graph = build_kernel_graph(llm)
         result = graph.invoke({
             "domain_state": {"user_prompt": "帮我分析这个问题"},
+            "task_flow": [],
             "data_schema": {},
             "workflow_rules": {},
-            "worker_instructions": {},
+            "selected_workers": [],
             "pending_patch": [],
             "patch_error": "",
             "step_count": 0,
         })
     """
+    registry = get_registry()
+
     # 创建通用 worker 节点的 input schema
-    class DynamicInputSchema(TypedDict):
+    class WorkerInputSchema(TypedDict):
         domain_state: dict
-        worker_instructions: Dict[str, str]
+        selected_workers: list[str]
         current_worker: str
-        data_schema: dict  # 添加 schema 信息用于类型检查
+        data_schema: dict
 
     # 通用 worker 节点
-    def universal_worker_node(state: dict[str, Any]) -> dict[str, Any]:
-        """通用 worker 节点，根据 current_worker 字段执行相应的 worker"""
+    def worker_node(state: dict[str, Any]) -> dict[str, Any]:
+        """通用 worker 节点，根据 current_worker 从 registry 创建 worker"""
         worker_name = state.get("current_worker", "")
-        instruction = state.get("worker_instructions", {}).get(worker_name, "")
+        worker_instructions = state.get("worker_instructions", {})
 
-        if not instruction:
+        # 获取该 worker 的特定指令
+        instruction = worker_instructions.get(worker_name, None)
+
+        # 从 registry 创建 worker，传递指令
+        worker = registry.create_worker(worker_name, llm, instruction)
+        if worker is None:
             return {
                 "pending_patch": [],
-                "patch_error": f"No instruction found for worker: {worker_name}",
+                "patch_error": f"Unknown worker type: {worker_name}",
             }
 
-        # 创建临时 worker 实例
-        worker = LLMWorkerAgent(llm, instruction=instruction)
-        worker.input_schema = DynamicInputSchema
+        worker.input_schema = WorkerInputSchema
 
         # 执行 worker
         return worker(state)
 
-    # 动态路由：使用 WorkflowRouter 实现三层终止机制
-    # 注意：这里 worker_names 是动态的，所以我们传入一个空列表
-    # Router 会根据 workflow_rules 动态匹配
+    # 动态路由
     router = WorkflowRouter(
         worker_names=[],  # 动态 worker，不预定义
         max_steps=max_steps,
@@ -127,12 +86,14 @@ def build_dynamic_kernel_graph(
         loop_detection_window=3,
     )
 
-    def dynamic_router(state: KernelState) -> str:
+    def route_to_worker(state: KernelState) -> str:
         """根据 workflow_rules 动态路由到 worker"""
-        # 使用 WorkflowRouter 的路由逻辑
+        # 检查是否正在等待用户输入
+        if state.get("waiting_for_user", False):
+            return END
+
         result = router.route(state)
 
-        # 如果 router 返回的是 worker 名称（而不是 END），返回 "worker" 节点
         if result != END:
             return "worker"
         return END
@@ -151,22 +112,69 @@ def build_dynamic_kernel_graph(
 
         return {"current_worker": ""}
 
+    # 处理用户响应的节点
+    def handle_user_response(state: KernelState) -> dict[str, Any]:
+        """处理用户的响应，更新对话历史"""
+        user_response = state.get("user_response", "")
+        pending_question = state.get("pending_user_question", "")
+        conversation_history = state.get("conversation_history", [])
+        domain_state = state.get("domain_state", {})
+
+        if user_response:
+            # 添加问题和回答到对话历史
+            new_history = conversation_history.copy()
+            if pending_question:
+                new_history.append({"role": "system", "content": pending_question})
+            new_history.append({"role": "user", "content": user_response})
+
+            # 更新 domain_state，将用户反馈添加到 user_prompt 中
+            # 这样 Architect 可以看到完整的上下文
+            new_domain_state = domain_state.copy()
+            original_prompt = new_domain_state.get("user_prompt", "")
+            new_domain_state["user_prompt"] = f"{original_prompt}\n\n用户反馈: {user_response}"
+            new_domain_state["user_feedback"] = user_response
+
+            return {
+                "conversation_history": new_history,
+                "pending_user_question": "",
+                "user_response": "",  # 清空 user_response，避免重复处理
+                "waiting_for_user": False,  # 清空等待标志
+                "domain_state": new_domain_state,
+            }
+
+        return {}
+
     builder = StateGraph(KernelState)
 
     # 添加节点
-    builder.add_node("architect", ArchitectAgent(llm))
+    builder.add_node("handle_user_response", handle_user_response)
+    builder.add_node("architect", OrchestratorArchitect(llm))
     builder.add_node("kernel", kernel_node)
     builder.add_node("set_worker", set_current_worker)
-    builder.add_node("worker", universal_worker_node, input_schema=DynamicInputSchema)
+    builder.add_node("worker", worker_node, input_schema=WorkerInputSchema)
+
+    # 条件边：检查是否是继续对话（有 user_response）还是新对话
+    def check_conversation_mode(state: KernelState) -> str:
+        """检查是继续对话还是新对话"""
+        # 如果有 user_response（非空字符串），说明是继续对话
+        if state.get("user_response", "").strip():
+            return "continue"
+        # 否则是新对话，需要 architect
+        return "new"
 
     # 添加边
-    builder.add_edge(START, "architect")
+    builder.add_conditional_edges(
+        START,
+        check_conversation_mode,
+        {"continue": "handle_user_response", "new": "architect"}
+    )
+    builder.add_edge("handle_user_response", "architect")  # 用户响应后重新从 Architect 开始
     builder.add_edge("architect", "kernel")
 
     # 条件边：从 kernel 到 set_worker 或 END
     builder.add_conditional_edges(
         "kernel",
-        dynamic_router,
+        route_to_worker,
         {"worker": "set_worker", END: END}
     )
 
@@ -174,3 +182,4 @@ def build_dynamic_kernel_graph(
     builder.add_edge("worker", "kernel")
 
     return builder.compile(checkpointer=checkpointer)
+

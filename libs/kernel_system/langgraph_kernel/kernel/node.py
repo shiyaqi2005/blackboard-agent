@@ -240,7 +240,7 @@ def kernel_node(state: KernelState) -> dict:
     state_history = state.get("state_history", [])
     state_history.append(copy.deepcopy(new_state))
 
-    return {
+    result = {
         "domain_state": new_state,
         "pending_patch": [],
         "patch_error": "",
@@ -251,3 +251,20 @@ def kernel_node(state: KernelState) -> dict:
         "status_history": status_history,
         "state_history": state_history,  # 保存完整的状态历史
     }
+
+    # 提升多轮对话控制字段到顶层状态
+    # 如果 domain_state 中有 waiting_for_user 或 pending_user_question，
+    # 将它们提升到顶层状态，以便路由逻辑可以检测到
+    if "waiting_for_user" in new_state:
+        result["waiting_for_user"] = new_state["waiting_for_user"]
+        print(f"\n💬 检测到用户交互请求: waiting_for_user={new_state['waiting_for_user']}")
+
+    if "pending_user_question" in new_state:
+        result["pending_user_question"] = new_state["pending_user_question"]
+        if new_state.get("waiting_for_user"):
+            question = new_state["pending_user_question"]
+            if len(question) > 100:
+                question = question[:100] + "..."
+            print(f"   问题: {question}")
+
+    return result

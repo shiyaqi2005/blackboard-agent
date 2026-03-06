@@ -31,9 +31,11 @@ class KernelState(TypedDict):
     """贯穿整个图执行的全局状态。"""
 
     # Architect 输出（只写一次）
+    task_flow: List[Dict[str, str]]  # 任务流：[{"subtask": "...", "worker": "..."}]
     data_schema: DataSchema
     workflow_rules: WorkflowRules
-    worker_instructions: Dict[str, str]  # worker名 -> 指令文本
+    worker_instructions: Dict[str, str]  # 新增：worker 指令 {"worker_name": "instruction"}
+    selected_workers: List[str]  # 选中的 worker 列表
 
     # 业务状态（受 data_schema 约束，由 kernel_node 验证后更新）
     domain_state: Annotated[Dict[str, Any], _overwrite]
@@ -42,7 +44,7 @@ class KernelState(TypedDict):
     pending_patch: JsonPatch   # worker 提交的 patch，等待 kernel 验证
     patch_error: str           # 验证失败时的错误信息，空字符串表示无错误
     step_count: int            # 已执行步数，防止无限循环
-    current_worker: str        # 当前要执行的 worker 名称（用于动态图）
+    current_worker: str        # 当前要执行的 worker 名称
 
     # Layer 5: 反馈重试
     retry_count: int           # 当前 worker 的重试次数
@@ -54,3 +56,9 @@ class KernelState(TypedDict):
 
     # 中间状态持久化：保留所有历史状态快照
     state_history: List[Dict[str, Any]]  # 每一步的 domain_state 快照
+
+    # 多轮对话支持
+    conversation_history: List[Dict[str, str]]  # 对话历史：[{"role": "user"/"system", "content": "..."}]
+    pending_user_question: str  # 等待用户回答的问题
+    user_response: str  # 用户的最新回复
+    waiting_for_user: bool  # 是否正在等待用户输入

@@ -4,19 +4,18 @@
 清晰展示系统执行过程：
 【步骤 N】模块名：执行内容
 """
-import json
 import sys
 from typing import Any
 
 sys.path.insert(0, '/home/syq/Documents/ApexLab/langgraph/libs/kernel_system')
 
-from langgraph_kernel import build_dynamic_kernel_graph
+from langgraph_kernel import build_kernel_graph
 from langgraph_kernel.llm_wrapper import SimpleChatModel
 
 
 def run_interactive_system(prompt: str, model: str = "deepseek-v3", verbose: bool = True):
     """
-    运行交互式系统
+    运行交互式系统（支持多轮对话）
 
     Args:
         prompt: 用户输入的 prompt
@@ -24,7 +23,7 @@ def run_interactive_system(prompt: str, model: str = "deepseek-v3", verbose: boo
         verbose: 是否显示详细信息
     """
     print("=" * 80)
-    print("  🚀 Architect-Kernel-Worker 系统")
+    print("  🚀 Architect-Kernel-Worker 系统（多轮对话模式）")
     print("=" * 80)
     print(f"\n📝 用户输入: {prompt}")
     print(f"🤖 使用模型: {model}\n")
@@ -35,138 +34,176 @@ def run_interactive_system(prompt: str, model: str = "deepseek-v3", verbose: boo
         api_key="sk-2OsXSnW0fVfpFVnT4HeOkGDue8bxgRflUSc9KqCx7mnNOTgb",
         base_url="https://tb.api.mkeai.com/v1",
         temperature=0.7,
-        timeout=60.0,  # 设置 60 秒超时
+        timeout=60.0,
     )
 
     # 构建图
-    graph = build_dynamic_kernel_graph(llm, max_steps=15)
+    graph = build_kernel_graph(llm, max_steps=15)
 
     # 初始状态
-    initial_state = {
+    current_state = {
         "domain_state": {"user_prompt": prompt},
+        "task_flow": [],
         "data_schema": {},
         "workflow_rules": {},
-        "worker_instructions": {},
+        "worker_instructions": {},  # 新增：worker 指令
+        "selected_workers": [],
         "pending_patch": [],
         "patch_error": "",
         "step_count": 0,
         "current_worker": "",
         "retry_count": 0,
         "error_feedback": "",
-        "state_history": [],  # 初始化状态历史
+        "state_history": [],
+        "conversation_history": [],
+        "pending_user_question": "",
+        "user_response": "",
+        "waiting_for_user": False,
+        "no_update_count": 0,
+        "status_history": [],
     }
 
     print("=" * 80)
     print("  执行过程")
     print("=" * 80)
 
-    step_number = 0
-    current_state = initial_state.copy()
-
-    # 用于跟踪实际的业务步骤（排除内部节点）
     business_step = 0
+    max_conversation_turns = 10  # 最多 10 轮对话
 
     try:
-        for event in graph.stream(initial_state, stream_mode="updates"):
-            node_name = list(event.keys())[0]
-            node_output = event[node_name]
+        # 主执行循环：支持多轮对话
+        for conversation_turn in range(max_conversation_turns + 1):
+            if conversation_turn > 0:
+                # 这是继续对话的轮次
+                if not current_state.get("waiting_for_user", False):
+                    # 不需要用户输入，结束
+                    break
 
-            # 跳过内部节点 set_worker
-            if node_name == "set_worker":
-                current_state.update(node_output)
-                continue
+                pending_question = current_state.get("pending_user_question", "")
+                if not pending_question:
+                    break
 
-            step_number += 1
+                print("\n" + "=" * 80)
+                print(f"  💬 第 {conversation_turn} 轮对话")
+                print("=" * 80)
+                print(f"\n❓ 系统: {pending_question}")
 
-            # 根据节点类型显示不同信息
-            if node_name == "architect":
-                business_step += 1
-                print(f"\n【步骤 {business_step}】Architect: 分析用户需求并设计系统架构")
+                # 获取用户输入
+                user_input = input("\n👤 您的回复: ").strip()
 
-                if verbose and "data_schema" in node_output:
-                    schema = node_output["data_schema"]
-                    if "properties" in schema:
-                        field_count = len(schema["properties"])
-                        print(f"  • 设计了 {field_count} 个状态字段")
+                if not user_input:
+                    print("⚠️  未输入内容，结束对话")
+                    break
 
-                if verbose and "workflow_rules" in node_output:
-                    rules = node_output["workflow_rules"]
-                    worker_count = len(set(w for r in rules.values() for w in r.values()))
-                    print(f"  • 设计了 {worker_count} 个 worker")
+                # 更新状态
+                current_state["user_response"] = user_input
+                current_state["waiting_for_user"] = False
 
-                if verbose and "domain_state" in node_output:
-                    domain = node_output["domain_state"]
-                    if "status" in domain:
-                        print(f"  • 初始状态: {domain['status']}")
+                print("\n" + "=" * 80)
+                print("  继续执行")
+                print("=" * 80)
 
-            elif node_name == "kernel":
-                # Kernel 不单独计数，它是验证和状态转换的中间步骤
-                step_count = node_output.get("step_count", 0)
+            # 执行图（stream 模式）
+            for event in graph.stream(current_state, stream_mode="updates"):
+                node_name = list(event.keys())[0]
+                node_output = event[node_name]
 
-                # 检查是否有状态变化
-                old_status = current_state.get("domain_state", {}).get("status", "")
-                new_status = node_output.get("domain_state", {}).get("status", "")
+                # 跳过内部节点
+                if node_name == "set_worker":
+                    current_state.update(node_output)
+                    continue
 
-                if new_status and new_status != old_status:
-                    print(f"  → Kernel: 验证通过，状态转换 {old_status} → {new_status}")
+                # 根据节点类型显示信息
+                if node_name == "handle_user_response":
+                    print(f"\n  → 处理用户响应并更新对话历史")
 
-                # 检查错误
-                if node_output.get("patch_error"):
-                    print(f"  → Kernel: ❌ 验证失败 - {node_output['patch_error'][:80]}...")
+                elif node_name == "architect":
+                    business_step += 1
+                    if conversation_turn == 0:
+                        print(f"\n【步骤 {business_step}】Architect: 分析用户需求并设计系统架构")
+                    else:
+                        print(f"\n【步骤 {business_step}】Architect: 根据新信息重新规划")
 
-            elif node_name == "worker":
-                # 获取当前 worker 名称
-                worker_name = current_state.get("current_worker", "unknown")
-                business_step += 1
+                    if verbose and "task_flow" in node_output:
+                        task_flow = node_output["task_flow"]
+                        if task_flow:
+                            print(f"  • 任务分解: {len(task_flow)} 个子任务")
+                            for i, task in enumerate(task_flow, 1):
+                                subtask = task.get("subtask", "")
+                                worker = task.get("worker", "")
+                                print(f"    {i}. {subtask[:60]}... → {worker}")
 
-                # 获取 worker 的指令来理解它的任务
-                instructions = current_state.get("worker_instructions", {})
-                instruction = instructions.get(worker_name, "")
+                elif node_name == "kernel":
+                    old_status = current_state.get("domain_state", {}).get("status", "")
+                    new_status = node_output.get("domain_state", {}).get("status", "")
 
-                # 提取任务描述（取第一句话）
-                task_desc = instruction.split('.')[0] if instruction else "执行任务"
-                if len(task_desc) > 60:
-                    task_desc = task_desc[:60] + "..."
+                    if new_status and new_status != old_status:
+                        print(f"  → Kernel: 验证通过，状态转换 {old_status} → {new_status}")
 
-                print(f"\n【步骤 {business_step}】{worker_name}: {task_desc}")
+                    if node_output.get("patch_error"):
+                        print(f"  → Kernel: ❌ 验证失败 - {node_output['patch_error'][:80]}...")
 
-                # 显示提交的 patch
-                if verbose and "pending_patch" in node_output:
-                    patch = node_output["pending_patch"]
-                    if patch:
-                        print(f"  • 提交了 {len(patch)} 个状态更新")
+                elif node_name == "worker":
+                    worker_name = current_state.get("current_worker", "unknown")
+                    business_step += 1
 
-                        # 显示每个 patch 操作的内容
-                        for i, op in enumerate(patch, 1):
-                            op_type = op.get("op", "unknown")
-                            path = op.get("path", "")
-                            value = op.get("value")
+                    # 从 task_flow 获取任务描述
+                    task_flow = current_state.get("task_flow", [])
+                    task_desc = "执行任务"
+                    for task in task_flow:
+                        if task.get("worker") == worker_name:
+                            task_desc = task.get("subtask", "执行任务")
+                            break
 
-                            # 提取字段名
-                            field_name = path.split("/")[-1] if "/" in path else path
+                    if len(task_desc) > 60:
+                        task_desc = task_desc[:60] + "..."
 
-                            if op_type in ["add", "replace"]:
-                                # 格式化显示值
+                    print(f"\n【步骤 {business_step}】{worker_name}: {task_desc}")
+
+                    if verbose and "pending_patch" in node_output:
+                        patch = node_output["pending_patch"]
+                        if patch:
+                            print(f"  • 提交了 {len(patch)} 个状态更新")
+                            print(f"  • Worker 提交的完整内容:")
+
+                            for i, op in enumerate(patch, 1):
+                                op_type = op.get("op", "unknown")
+                                path = op.get("path", "")
+                                value = op.get("value")
+                                field_name = path.split("/")[-1] if "/" in path else path
+
+                                # 显示完整内容，不截断
+                                print(f"\n    [{i}] {op_type} {field_name}:")
+
                                 if isinstance(value, str):
-                                    # 字符串：如果太长则截断
-                                    if len(value) > 100:
-                                        print(f"    {i}. {op_type} {field_name}: {value[:100]}...")
+                                    # 字符串类型，按行显示
+                                    if "\n" in value:
+                                        print("    " + "-" * 60)
+                                        for line in value.split("\n"):
+                                            print(f"    {line}")
+                                        print("    " + "-" * 60)
                                     else:
-                                        print(f"    {i}. {op_type} {field_name}: {value}")
-                                elif isinstance(value, (list, dict)):
-                                    # 列表或对象：显示类型和大小
-                                    if isinstance(value, list):
-                                        print(f"    {i}. {op_type} {field_name}: [列表，{len(value)} 项]")
-                                    else:
-                                        print(f"    {i}. {op_type} {field_name}: {{对象，{len(value)} 个字段}}")
+                                        print(f"    {value}")
+                                elif isinstance(value, (dict, list)):
+                                    # 字典或列表，格式化显示
+                                    import json
+                                    formatted = json.dumps(value, indent=6, ensure_ascii=False)
+                                    print(f"    {formatted}")
                                 else:
-                                    # 其他类型：直接显示
-                                    print(f"    {i}. {op_type} {field_name}: {value}")
-                            elif op_type == "remove":
-                                print(f"    {i}. remove {field_name}")
+                                    # 其他类型
+                                    print(f"    {value}")
 
-            # 更新当前状态
-            current_state.update(node_output)
+                # 更新当前状态
+                current_state.update(node_output)
+
+            # 检查是否需要继续对话
+            if not current_state.get("waiting_for_user", False):
+                # 不需要用户输入，结束循环
+                break
+
+        # 检查是否达到最大轮数
+        if current_state.get("waiting_for_user", False):
+            print(f"\n⚠️  已达到最大对话轮数 ({max_conversation_turns})，结束对话")
 
         # 显示最终结果
         print("\n" + "=" * 80)
@@ -182,6 +219,17 @@ def run_interactive_system(prompt: str, model: str = "deepseek-v3", verbose: boo
         print(f"  • 最终状态: {domain_state.get('status', '未知')}")
         error = final_state.get('patch_error')
         print(f"  • 错误: {error if error else '无'}")
+
+        # 显示对话历史（如果有）
+        conversation_history = final_state.get("conversation_history", [])
+        if conversation_history:
+            print(f"\n💬 对话历史 ({len(conversation_history)} 条):")
+            for i, msg in enumerate(conversation_history, 1):
+                role = "🤖 系统" if msg["role"] == "system" else "👤 用户"
+                content = msg["content"]
+                if len(content) > 100:
+                    content = content[:100] + "..."
+                print(f"  {i}. {role}: {content}")
 
         # 显示业务数据（排除 user_prompt 和 status）
         print(f"\n📋 生成的内容:")
@@ -255,10 +303,16 @@ def run_interactive_system(prompt: str, model: str = "deepseek-v3", verbose: boo
 
 def main():
     """主函数"""
+    # 检查是否是测试模式（暂时禁用）
+    # if len(sys.argv) > 1 and sys.argv[1] == "test":
+    #     test_multi_turn()
+    #     return
+
     print("=" * 80)
     print("  🤖 Architect-Kernel-Worker 交互式演示系统")
     print("=" * 80)
     print("\n这个系统可以处理任意模糊的用户 prompt，自动设计工作流并执行。")
+    print("支持多轮对话：系统会在需要时向您请求更多信息。")
     print("\n示例 prompt:")
     print("  • 帮我规划一次旅行")
     print("  • 分析销售数据")
