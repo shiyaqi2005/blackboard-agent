@@ -1,0 +1,15 @@
+{
+  "env_name": "webarena",
+  "task_set": "script_browser_smoke",
+  "root_dir": "../../../webarena/config_files",
+  "selection": {
+    "mode": "explicit",
+    "items": [
+      "examples/3.json"
+    ],
+    "seed": 42
+  },
+  "metadata": {
+    "description": "Single-task non-login script_browser smoke manifest for official_prompt and compare plumbing. Not for formal WebArena benchmark reporting."
+  }
+}

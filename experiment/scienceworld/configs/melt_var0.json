@@ -1,0 +1,9 @@
+{
+  "task_id": "1-2",
+  "task_name": "1-2",
+  "variation_idx": 0,
+  "simplification_str": "easy",
+  "split": "debug",
+  "max_episode_steps": 50,
+  "notes": "melt variation 0"
+}

@@ -1,0 +1,9 @@
+{
+  "task_id": "6-1",
+  "task_name": "6-1",
+  "variation_idx": 0,
+  "simplification_str": "easy",
+  "split": "formal",
+  "max_episode_steps": 50,
+  "notes": "chemistry-mix variation 0"
+}

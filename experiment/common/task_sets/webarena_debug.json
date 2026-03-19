@@ -1,0 +1,18 @@
+{
+  "env_name": "webarena",
+  "task_set": "debug",
+  "root_dir": "../../../webarena/config_files",
+  "selection": {
+    "mode": "explicit",
+    "items": [
+      "examples/1.json",
+      "examples/2.json",
+      "examples/3.json",
+      "examples/4.json"
+    ],
+    "seed": 42
+  },
+  "metadata": {
+    "description": "WebArena local debug subset using the checked-in example configs."
+  }
+}

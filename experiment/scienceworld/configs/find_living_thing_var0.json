@@ -1,0 +1,9 @@
+{
+  "task_id": "4-1",
+  "task_name": "4-1",
+  "variation_idx": 0,
+  "simplification_str": "easy",
+  "split": "debug",
+  "max_episode_steps": 50,
+  "notes": "find-living-thing variation 0"
+}

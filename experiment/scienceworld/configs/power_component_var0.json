@@ -1,0 +1,9 @@
+{
+  "task_id": "3-1",
+  "task_name": "3-1",
+  "variation_idx": 0,
+  "simplification_str": "easy",
+  "split": "debug",
+  "max_episode_steps": 50,
+  "notes": "power-component variation 0"
+}

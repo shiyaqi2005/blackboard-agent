@@ -1,0 +1,9 @@
+{
+  "task_id": "2-1",
+  "task_name": "2-1",
+  "variation_idx": 0,
+  "simplification_str": "easy",
+  "split": "formal",
+  "max_episode_steps": 50,
+  "notes": "use-thermometer variation 0"
+}

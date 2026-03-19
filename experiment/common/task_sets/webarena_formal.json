@@ -1,0 +1,18 @@
+{
+  "env_name": "webarena",
+  "task_set": "formal",
+  "root_dir": "../../../webarena/config_files",
+  "selection": {
+    "mode": "glob",
+    "patterns": [
+      "*.json"
+    ],
+    "exclude": [
+      "test.raw.json"
+    ],
+    "seed": 42
+  },
+  "metadata": {
+    "description": "WebArena full config set after running scripts/generate_test_data.py."
+  }
+}

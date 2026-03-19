@@ -1,0 +1,37 @@
+{
+  "n_episodes": 1,
+  "success_rate": 1.0,
+  "mean_steps": 1.0,
+  "mean_total_tokens": 2471.0,
+  "mean_worker_input_tokens": 2392.0,
+  "mean_worker_output_tokens": 79.0,
+  "mean_architect_input_tokens": 0.0,
+  "mean_architect_output_tokens": 0.0,
+  "mean_architect_total_tokens": 0.0,
+  "mean_goal_condition_rate": 1.0,
+  "mean_fallback_rate": 0.0,
+  "mean_patch_error_rate": 0.0,
+  "site_breakdown": {
+    "misc": {
+      "n_episodes": 1.0,
+      "success_rate": 1.0,
+      "mean_goal_condition_rate": 1.0
+    }
+  },
+  "stop_reason_breakdown": {
+    "official_evaluator": 1
+  },
+  "final_status_breakdown": {
+    "success": 1
+  },
+  "workflow_final_status_breakdown": {
+    "completed": 1
+  },
+  "schema_version": "experiment_result.v1",
+  "record_type": "summary",
+  "run_id": "official_prompt_prompt",
+  "system_id": "official_prompt_prompt",
+  "system_family": "webarena_prompt",
+  "env_name": "webarena",
+  "metadata": {}
+}
